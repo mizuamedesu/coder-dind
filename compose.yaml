@@ -1,0 +1,62 @@
+services:
+  coder:
+    image: ${CODER_REPO:-ghcr.io/coder/coder}:${CODER_VERSION:-latest}
+    network_mode: "service:dind"
+    environment:
+      CODER_PG_CONNECTION_URL: "postgresql://${POSTGRES_USER:-username}:${POSTGRES_PASSWORD:-password}@database/${POSTGRES_DB:-coder}?sslmode=disable"
+      CODER_HTTP_ADDRESS: "0.0.0.0:7080"
+      CODER_ACCESS_URL: "${CODER_ACCESS_URL:-http://localhost:7080}"
+      DOCKER_HOST: "unix:///var/run/docker-host/docker.sock"
+    group_add:
+     - "1000" # docker group on dind
+    volumes:
+      - dind_socket:/var/run/docker-host:ro
+      - coder_home:/home/coder
+    depends_on:
+      dind:
+        condition: service_started
+      database:
+        condition: service_healthy
+  dind:
+    image: "docker:dind"
+    privileged: true
+    ports:
+      - "7080:7080"
+    entrypoint: ["sh", "-c"]
+    command: 
+      - "addgroup -g 1000 coder && rm -f /var/run/docker.pid /var/run/docker/containerd/containerd.pid && exec dockerd -H unix:///var/run/docker.sock --group coder"
+    volumes:
+      - dind_socket:/var/run
+      - dind_data:/var/lib/docker
+    healthcheck:
+      test: ["CMD", "docker", "info"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+  database:
+    # Minimum supported version is 13.
+    # More versions here: https://hub.docker.com/_/postgres
+    image: "postgres:17"
+    # Uncomment the next two lines to allow connections to the database from outside the server.
+    #ports:
+    #  - "5432:5432"
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-username} # The PostgreSQL user (useful to connect to the database)
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-password} # The PostgreSQL password (useful to connect to the database)
+      POSTGRES_DB: ${POSTGRES_DB:-coder} # The PostgreSQL default database (automatically created at first launch)
+    volumes:
+      - coder_data:/var/lib/postgresql/data # Use "docker volume rm coder_coder_data" to reset Coder
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U ${POSTGRES_USER:-username} -d ${POSTGRES_DB:-coder}",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+volumes:
+  coder_data:
+  coder_home:
+  dind_socket:
+  dind_data:
