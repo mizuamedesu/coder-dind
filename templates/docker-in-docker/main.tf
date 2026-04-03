@@ -20,7 +20,6 @@ variable "docker_socket" {
 }
 
 provider "docker" {
-  # Defaulting to null if the variable is an empty string lets us have an optional variable without having to set our own default
   host = var.docker_socket != "" ? var.docker_socket : null
 }
 
@@ -33,6 +32,9 @@ resource "coder_agent" "main" {
   os             = "linux"
   startup_script = <<-EOT
     set -e
+
+    # All install logs go to a file to avoid NULL bytes in DB
+    INSTALL_LOG="/tmp/startup-install.log"
 
     # Change apt mirror to Japanese mirror
     ARCH=$(dpkg --print-architecture)
@@ -49,12 +51,13 @@ resource "coder_agent" "main" {
     fi
 
     # Install the latest code-server.
-    # Append "--version x.x.x" to install a specific version of code-server.
     mkdir -p $HOME/.cache
-    curl -fsSL https://code-server.dev/install.sh | sh -s -- --method=standalone --prefix=$HOME/.cache/code-server
+    echo "=== Installing code-server ==="
+    curl -fsSL https://code-server.dev/install.sh | sh -s -- --method=standalone --prefix=$HOME/.cache/code-server >> "$INSTALL_LOG" 2>&1
 
     # Install Japanese language pack & configure locale
-    $HOME/.cache/code-server/bin/code-server --install-extension MS-CEINTL.vscode-language-pack-ja
+    echo "=== Installing VS Code language pack ==="
+    $HOME/.cache/code-server/bin/code-server --install-extension MS-CEINTL.vscode-language-pack-ja >> "$INSTALL_LOG" 2>&1
     OUTPUT_DIR="$HOME/.local/share/code-server"
     LANGUAGE_PACK_FOLDER=$(find "$OUTPUT_DIR/extensions" -maxdepth 1 -type d -name "ms-ceintl.vscode-language-pack-*" | head -1)
     if [ -n "$LANGUAGE_PACK_FOLDER" ] && [ -f "$LANGUAGE_PACK_FOLDER/package.json" ] && [ -f "$OUTPUT_DIR/extensions/extensions.json" ]; then
@@ -73,11 +76,12 @@ resource "coder_agent" "main" {
         '{locale: $pkg[0].contributes.localizations[0].languageId}' > "$OUTPUT_DIR/User/argv.json"
     fi
 
-    # Install code extention
+    # Install code extensions
+    echo "=== Installing VS Code extensions ==="
     $HOME/.cache/code-server/bin/code-server \
       --install-extension anthropic.claude-code \
       --install-extension openai.chatgpt \
-      --install-extension Google.geminicodeassist
+      --install-extension Google.geminicodeassist >> "$INSTALL_LOG" 2>&1
 
     cat > "$HOME/.local/share/code-server/User/settings.json" <<'SETTINGS'
     {
@@ -90,30 +94,34 @@ resource "coder_agent" "main" {
     # Start code-server in the background.
     $HOME/.cache/code-server/bin/code-server --auth none --port 13337 --app-name "code-server" > /tmp/code-server.log 2>&1 &
 
-    # Add any commands that should be executed at workspace startup (e.g install requirements, start a program, etc) here
-
     # Install Node.js
     if ! command -v node &> /dev/null; then
-      curl -fsSL https://deb.nodesource.com/setup_24.x | sudo -E bash -
-      sudo apt-get install -y nodejs
+      echo "=== Installing Node.js ==="
+      curl -fsSL https://deb.nodesource.com/setup_24.x | sudo -E bash - >> "$INSTALL_LOG" 2>&1
+      sudo apt-get install -y nodejs >> "$INSTALL_LOG" 2>&1
     fi
 
     # --- Claude Code ---
     if ! command -v claude &> /dev/null; then
-      curl -fsSL https://claude.ai/install.sh | bash
+      echo "=== Installing Claude Code ==="
+      curl -fsSL https://claude.ai/install.sh | bash >> "$INSTALL_LOG" 2>&1
       export PATH="$HOME/.local/bin:$HOME/.claude/bin:$PATH"
     fi
 
     # --- Gemini CLI (npm) ---
-    sudo npm install -g @google/gemini-cli
+    echo "=== Installing Gemini CLI ==="
+    sudo npm install -g @google/gemini-cli >> "$INSTALL_LOG" 2>&1
 
     # --- Copilot CLI (npm) ---
-    sudo npm install -g @github/copilot
+    echo "=== Installing Copilot CLI ==="
+    sudo npm install -g @github/copilot >> "$INSTALL_LOG" 2>&1
 
     # --- Cursor Agent ---
-    curl -fsSL https://cursor.com/install | bash
+    echo "=== Installing Cursor Agent ==="
+    curl -fsSL https://cursor.com/install | bash >> "$INSTALL_LOG" 2>&1
 
     # --- Codex CLI ---
+    echo "=== Installing Codex CLI ==="
     MACHINE_ARCH=$(uname -m)
     case "$MACHINE_ARCH" in
       aarch64) CODEX_ARCH="aarch64" ;;
@@ -123,17 +131,15 @@ resource "coder_agent" "main" {
     cd /tmp
     curl -sSL $(curl -s https://api.github.com/repos/openai/codex/releases/latest | \
       jq -r '.assets[] | select(.name | contains("'"$CODEX_ARCH"'") and endswith("unknown-linux-musl.tar.gz") and (contains("codex-responses-api-proxy") | not)) | .browser_download_url') \
-      -o codex-$${CODEX_ARCH}-unknown-linux-musl.tar.gz
-    sudo tar -zxvf codex-$${CODEX_ARCH}-unknown-linux-musl.tar.gz -C /usr/local/bin
-    sudo mv /usr/local/bin/codex-$${CODEX_ARCH}-unknown-linux-musl /usr/local/bin/codex
-    rm codex-$${CODEX_ARCH}-unknown-linux-musl.tar.gz
+      -o codex-$${CODEX_ARCH}-unknown-linux-musl.tar.gz >> "$INSTALL_LOG" 2>&1
+    sudo tar -zxvf codex-$${CODEX_ARCH}-unknown-linux-musl.tar.gz -C /usr/local/bin >> "$INSTALL_LOG" 2>&1
+    sudo mv /usr/local/bin/codex-$${CODEX_ARCH}-unknown-linux-musl /usr/local/bin/codex 2>/dev/null || true
+    rm -f codex-$${CODEX_ARCH}-unknown-linux-musl.tar.gz
+
+    echo "=== Startup complete ==="
 
   EOT
 
-  # These environment variables allow you to make Git commits right away after creating a
-  # workspace. Note that they take precedence over configuration defined in ~/.gitconfig!
-  # You can remove this block if you'd prefer to configure Git manually or using
-  # dotfiles. (see docs/dotfiles.md)
   env = {
     GIT_AUTHOR_NAME     = coalesce(data.coder_workspace_owner.me.full_name, data.coder_workspace_owner.me.name)
     GIT_AUTHOR_EMAIL    = "${data.coder_workspace_owner.me.email}"
@@ -141,15 +147,10 @@ resource "coder_agent" "main" {
     GIT_COMMITTER_EMAIL = "${data.coder_workspace_owner.me.email}"
   }
 
-  # The following metadata blocks are optional. They are used to display
-  # information about your workspace in the dashboard. You can remove them
-  # if you don't want to display any information.
-  # For basic resources, you can use the `coder stat` command.
-  # If you need more control, you can write your own script.
   metadata {
     display_name = "CPU Usage"
     key          = "0_cpu_usage"
-    script       = "coder stat cpu"
+    script       = "coder stat cpu 2>/dev/null || echo 'N/A'"
     interval     = 10
     timeout      = 1
   }
@@ -157,7 +158,9 @@ resource "coder_agent" "main" {
   metadata {
     display_name = "RAM Usage"
     key          = "1_ram_usage"
-    script       = "coder stat mem"
+    script       = <<EOT
+      free -b | awk '/^Mem/ { printf("%.1f/%.1f GiB (%.0f%%)", $3/1073741824, $2/1073741824, $3/$2*100) }'
+    EOT
     interval     = 10
     timeout      = 1
   }
@@ -165,7 +168,7 @@ resource "coder_agent" "main" {
   metadata {
     display_name = "Home Disk"
     key          = "3_home_disk"
-    script       = "coder stat disk --path $${HOME}"
+    script       = "coder stat disk --path $${HOME} 2>/dev/null || echo 'N/A'"
     interval     = 60
     timeout      = 1
   }
@@ -173,7 +176,7 @@ resource "coder_agent" "main" {
   metadata {
     display_name = "CPU Usage (Host)"
     key          = "4_cpu_usage_host"
-    script       = "coder stat cpu --host"
+    script       = "coder stat cpu --host 2>/dev/null || echo 'N/A'"
     interval     = 10
     timeout      = 1
   }
@@ -181,7 +184,7 @@ resource "coder_agent" "main" {
   metadata {
     display_name = "Memory Usage (Host)"
     key          = "5_mem_usage_host"
-    script       = "coder stat mem --host"
+    script       = "coder stat mem --host 2>/dev/null || echo 'N/A'"
     interval     = 10
     timeout      = 1
   }
@@ -189,19 +192,18 @@ resource "coder_agent" "main" {
   metadata {
     display_name = "Load Average (Host)"
     key          = "6_load_host"
-    # get load avg scaled by number of cores
-    script   = <<EOT
-      echo "`cat /proc/loadavg | awk '{ print $1 }'` `nproc`" | awk '{ printf "%0.2f", $1/$2 }'
+    script       = <<EOT
+      echo "`cat /proc/loadavg | awk '{ print $1 }'` `nproc`" | awk '{ printf "%0.2f", $1/$2 }' 2>/dev/null || echo 'N/A'
     EOT
-    interval = 60
-    timeout  = 1
+    interval     = 60
+    timeout      = 1
   }
 
   metadata {
     display_name = "Swap Usage (Host)"
     key          = "7_swap_host"
     script       = <<EOT
-      free -b | awk '/^Swap/ { printf("%.1f/%.1f", $3/1024.0/1024.0/1024.0, $2/1024.0/1024.0/1024.0) }'
+      free -b | awk '/^Swap/ { printf("%.1f/%.1f", $3/1024.0/1024.0/1024.0, $2/1024.0/1024.0/1024.0) }' 2>/dev/null || echo 'N/A'
     EOT
     interval     = 10
     timeout      = 1
@@ -226,7 +228,6 @@ resource "coder_app" "code-server" {
   }
 }
 
-# See https://registry.coder.com/modules/coder/jetbrains
 module "jetbrains" {
   count      = data.coder_workspace.me.start_count
   source     = "registry.coder.com/coder/jetbrains/coder"
@@ -238,22 +239,20 @@ module "jetbrains" {
 }
 
 module "filebrowser" {
-  source   = "registry.coder.com/modules/filebrowser/coder"
-  version  = "~> 1.1.3"
-  agent_id = coder_agent.main.id
+  source     = "registry.coder.com/modules/filebrowser/coder"
+  version    = "~> 1.1.3"
+  agent_id   = coder_agent.main.id
   agent_name = "main"
-  folder   = "/home/coder"
+  folder     = "/home/coder"
   subdomain  = false
   order      = 2
 }
 
 resource "docker_volume" "home_volume" {
   name = "coder-${data.coder_workspace.me.id}-home"
-  # Protect the volume from being deleted due to changes in attributes.
   lifecycle {
     ignore_changes = all
   }
-  # Add labels in Docker to keep track of orphan resources.
   labels {
     label = "coder.owner"
     value = data.coder_workspace_owner.me.name
@@ -266,8 +265,6 @@ resource "docker_volume" "home_volume" {
     label = "coder.workspace_id"
     value = data.coder_workspace.me.id
   }
-  # This field becomes outdated if the workspace is renamed but can
-  # be useful for debugging or cleaning out dangling volumes.
   labels {
     label = "coder.workspace_name_at_creation"
     value = data.coder_workspace.me.name
@@ -285,7 +282,7 @@ resource "docker_container" "dind" {
   name       = "dind-${data.coder_workspace.me.id}"
   entrypoint = ["sh", "-c"]
   command    = ["addgroup -g 1000 coder && rm -f /var/run/docker.pid && exec dockerd -H unix:///var/run/docker.sock --group coder"]
-  
+
   volumes {
     volume_name    = docker_volume.dind_socket.name
     container_path = "/var/run"
@@ -294,13 +291,10 @@ resource "docker_container" "dind" {
 }
 
 resource "docker_container" "workspace" {
-  count = data.coder_workspace.me.start_count
-  image = "codercom/enterprise-base:ubuntu"
-  # Uses lower() to avoid Docker restriction on container names.
-  name = "coder-${data.coder_workspace_owner.me.name}-${lower(data.coder_workspace.me.name)}"
-  # Hostname makes the shell more user friendly: coder@my-workspace:~$
+  count    = data.coder_workspace.me.start_count
+  image    = "codercom/enterprise-base:ubuntu"
+  name     = "coder-${data.coder_workspace_owner.me.name}-${lower(data.coder_workspace.me.name)}"
   hostname = data.coder_workspace.me.name
-  # Use the docker gateway if the access URL is 127.0.0.1
   entrypoint = ["sh", "-c", replace(coder_agent.main.init_script, "/localhost|127\\.0\\.0\\.1/", "host.docker.internal")]
 
   env = [
@@ -322,7 +316,6 @@ resource "docker_container" "workspace" {
     read_only      = false
   }
 
-  # Add labels in Docker to keep track of orphan resources.
   labels {
     label = "coder.owner"
     value = data.coder_workspace_owner.me.name
