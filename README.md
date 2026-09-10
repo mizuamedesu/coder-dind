@@ -44,7 +44,7 @@ DinD 内のコンテナでは cgroup v2 が threaded モードになるため、
 ```powershell
 winget install Coder.Coder
 coder login http://localhost:7080
-coder templates push docker --directory .\templates\docker-in-docker
+coder templates push dev-tools --directory .\templates\dev-tools
 ```
 
 ### macOS
@@ -52,7 +52,7 @@ coder templates push docker --directory .\templates\docker-in-docker
 ```sh
 brew install coder
 coder login http://localhost:7080
-coder templates push docker --directory ./templates/docker-in-docker
+coder templates push dev-tools --directory ./templates/dev-tools
 ```
 
 ### Linux
@@ -60,17 +60,17 @@ coder templates push docker --directory ./templates/docker-in-docker
 ```sh
 curl -fsSL https://coder.com/install.sh | sh
 coder login http://localhost:7080
-coder templates push docker --directory ./templates/docker-in-docker
+coder templates push dev-tools --directory ./templates/dev-tools
 ```
 
 ## テンプレート
 
-[templates/docker-in-docker/](templates/docker-in-docker/) — AI コーディングツール・日本語環境入りのワークスペーステンプレート。
+[templates/dev-tools/](templates/dev-tools/) — code-server、開発CLI、MDX CLI と skills 入りのワークスペーステンプレート。
 
 
 ## Developer Tools + MDX（全ユーザー向け）
 
-[templates/dev-tools/](templates/dev-tools/) は code-server（AI拡張なし）、File Browser、tmux、GitHub CLI、Codex CLI、Claude Code CLI、MDX CLI と MDX skills を提供します。既存のDocker-in-Dockerテンプレートも残しています。
+[templates/dev-tools/](templates/dev-tools/) は code-server（AI拡張なし）、File Browser、tmux、GitHub CLI、Codex CLI、Claude Code CLI、MDX CLI と MDX skills を提供します。
 
 ```sh
 coder login https://coder.mizuame.app
