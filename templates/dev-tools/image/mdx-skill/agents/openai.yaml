@@ -1,0 +1,4 @@
+interface:
+  display_name: "MDX CLI"
+  short_description: "MDX 1 CLI operations and safety guide"
+  default_prompt: "Use $mdx-cli to plan safe MDX VM, network, project, template, and task CLI operations."
