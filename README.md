@@ -65,7 +65,17 @@ coder templates push dev-tools --directory ./templates/dev-tools
 
 ## テンプレート
 
+[templates/standard-develop/](templates/standard-develop/) — Codex、Claude、GitHub CLI、tmux、DinD、code-server入りの標準ワークスペーステンプレート。MDXは含みません。
+
 [templates/dev-tools/](templates/dev-tools/) — code-server、開発CLI、MDX CLI と skills 入りのワークスペーステンプレート。
+
+## Standard Develop（デフォルト）
+
+```sh
+coder login https://coder.mizuame.app
+coder templates push standard-develop --directory ./templates/standard-develop --yes
+coder templates edit standard-develop --display-name "Standard Develop" --description "Default development workspace with Codex, Claude, GitHub CLI, tmux, DinD, and code-server" --yes
+```
 
 
 ## Developer Tools + MDX（全ユーザー向け）
