@@ -7,3 +7,10 @@
 *.tfstate.backup
 *.tfplan
 .terraform.lock.hcl
+
+# Local HeteroCloud deployment state and credentials
+.heterocloud/
+__pycache__/
+
+# Pin provider dependencies for the deployed Flash template.
+!templates/heterocloud/.terraform.lock.hcl

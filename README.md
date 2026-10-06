@@ -4,6 +4,8 @@ Docker Compose 一発で立ち上がる Coder サーバー。
 
 DinD (Docker in Docker) 構成なので、ホストに Docker さえあれば Coder + ワークスペース環境がまるごと動く。ワークスペース内でも `docker` コマンドが使える。個人利用・検証向け。
 
+HeteroCloudへの展開は[専用のCLI手順](deploy/heterocloud/README.md)と[Standard DevelopのFlash版](templates/heterocloud/)を使用する。ワークスペースごとに4 vCPU・8 GiB RAM・30 GiB diskのFlashサービスを作成し、ホームを永続化する。標準ツール、VS Code、File Browser、Web Terminalを利用できる。現在のFlash版はDocker CLIのみで、DinDは提供しない。
+
 ## 起動
 
 ```sh
