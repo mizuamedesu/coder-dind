@@ -2,8 +2,10 @@
 """CLI deployment helper. Run with: uv run --with httpx manage.py ACTION."""
 import argparse
 import base64
+import csv
 import gzip
 import hashlib
+import io
 import json
 import os
 from pathlib import Path
@@ -410,16 +412,32 @@ def publish_template():
         "coder_url": STATE["url"],
         "coder_private_url": STATE["private_url"],
     }
+    # Increase rootfs and total disk together so retained persistent homes
+    # never lose space. Keep any larger allocations made outside Terraform.
+    existing = api("GET", "/flash/services")["items"]
+    storage_overrides = {
+        obj["spec"]["metadata"]["coder_workspace"]: {
+            "total_disk_gib": max(37, obj["spec"]["ephemeral_storage_gib"]
+                                  + max(0, 10 - (obj["spec"].get("rootfs_storage_gib") or 1))),
+            "rootfs_storage_gib": max(10, obj["spec"].get("rootfs_storage_gib") or 1),
+        }
+        for obj in existing
+        if obj["spec"].get("metadata", {}).get("application") == "coder"
+        and obj["spec"].get("metadata", {}).get("coder_workspace")
+    }
+    values["workspace_storage_overrides"] = json.dumps(storage_overrides, separators=(",", ":"))
     command = [sys.executable, str(Path(__file__).with_name("coder.py")),
                "templates", "push", STATE.get("template_name", "standard-develop"), "--yes",
                "--directory", str(ROOT / "templates/heterocloud")]
     for key, value in values.items():
-        command += ["--variable", f"{key}={value}"]
+        field = io.StringIO()
+        csv.writer(field, lineterminator="").writerow([f"{key}={value}"])
+        command += ["--variable", field.getvalue()]
     subprocess.run(command, check=True)
     template = STATE.get("template_name", "standard-develop")
     subprocess.run([sys.executable, str(Path(__file__).with_name("coder.py")), "templates", "edit", template,
-                    "--display-name", "Standard Develop", "--default-ttl", "8h", "--icon", "/icon/code.svg",
-                    "--description", "Codex・Claude・gh・tmux・Docker CLI・VS Code・File Browser・Terminal。4CPU/8GiB/30GiB。MDXなし。FlashはDinD未対応。",
+                    "--display-name", "Standard Develop", "--default-ttl", "0h", "--icon", "/icon/code.svg",
+                    "--description", "Codex・Claude・gh・tmux・Docker CLI・VS Code・File Browser・Terminal。4CPU/8GiB/37GiB、一時10GiB。MDXなし。FlashはDinD未対応。",
                     "--yes"], check=True)
     STATE["template_name"] = template
     save()

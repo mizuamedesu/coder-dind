@@ -1,6 +1,6 @@
 # HeteroCloud deployment
 
-HeteroCloud v0.1.102のタスクIAMを使い、Flash上にCoder v2.37.3を展開する。操作はCLI/APIのみ。
+HeteroCloudのタスクIAMを使い、Flash上にCoder v2.37.3を展開する。一時領域の後からの変更はHeteroCloud v0.1.105 / Flash v0.1.48以降に対応。操作はCLI/APIのみ。
 
 ## 構成
 
@@ -8,13 +8,13 @@ HeteroCloud v0.1.102のタスクIAMを使い、Flash上にCoder v2.37.3を展開
 | --- | --- | --- | --- |
 | `coder` | HTTPS Web endpoint | 1 vCPU / 1 GiB RAM / 8 GiB disk | `/root`の設定・キャッシュ・認証接続プログラム |
 | `coder-postgres` | VPC内のCoderのみ、TCP 5432 | 0.25 vCPU / 512 MiB RAM / 8 GiB disk | `/root/postgresql/data` |
-| ワークスペースごとのFlash | 非公開、Coder Agentから接続 | 4 vCPU / 8 GiB RAM / 30 GiB disk | `/root`、作業用は`/root/projects` |
+| ワークスペースごとのFlash | 非公開、Coder Agentから接続 | 4 vCPU / 8 GiB RAM / 37 GiB disk（一時10 GiB） | `/root`、作業用は`/root/projects` |
 
 VPCのNATでCoderとワークスペースの外向き通信を許可する。DBの外向き通信は無効。
 停止・再開は`spec.stopped`を更新し、同じFlashサービスIDと永続ホームを保持する。
 **ワークスペースを削除すると、対応するFlashサービスとホームも削除される。**
 
-Flashのdiskはイメージ・書き込み用rootfs・永続ホームの合計。rootfsの予約はCoderが2 GiB、DBが1 GiB、ワークスペースが3 GiB。既存PVCを縮小する更新はできない。
+Flashのdiskはイメージ・書き込み用rootfs・永続ホームの合計。rootfsの予約はCoderが2 GiB、DBが1 GiB、ワークスペースが10 GiB。ワークスペースは従来の総容量30 GiB / rootfs 3 GiBから両方を7 GiBずつ増やし、永続ホームの割当を維持する。HeteroCloud 0.1.105 / Flash 0.1.48以降はrootfsを後から変更でき、同じサービスIDとPVCを保持する。永続ディスクの縮小は行わない。コンテナは再作成される場合がある。
 Docker-in-DockerはFlash実機で通常のmount namespace作成が`Operation not permitted`になる。ユーザー名前空間経由ではnamespaceとtmpfsを作成できるが、RootlessKitの複数UID/GIDマッピングは`newuidmap: write to uid_map failed: Operation not permitted`で失敗した。このテンプレートではDockerデーモンを起動しない。
 `templates/standard-develop/image/Dockerfile`からLinux amd64イメージを作り、Flash Registryへ保存してdigestで固定する。Flashが提供するrootユーザーで実行する。Coder AgentはVPC内のCoderから取得する。
 Codex、Claude Code、GitHub CLI、tmux、Docker CLI、code-serverはイメージに同梱する。MDXとAI拡張は含まない。File BrowserはCoderの公式モジュールv1.1.6で導入し、永続`/root`を表示する。Web TerminalとSSHも利用できる。
@@ -105,7 +105,7 @@ uv run --with httpx deploy/heterocloud/manage.py github-login --github-user mizu
 
 ## 日常操作
 
-2026-10-06にユーザーの依頼で`dev`と検証用`standard-check`、復旧用の一時Flashサービスを削除した。ワークスペースは現在0件で、`standard-develop`テンプレートとCoder本体・DBは稼働している。テンプレートの既定スペックは4 vCPU・8 GiB RAM・30 GiB disk、既定の自動停止は8時間。確認結果は`.heterocloud/standard-template-verification.json`と`.heterocloud/verification.json`。
+2026-10-06にユーザーの依頼で`dev`と検証用`standard-check`、復旧用の一時Flashサービスを削除した。その後作成されたワークスペースは削除せず、設定更新で管理する。テンプレートの既定スペックは4 vCPU・8 GiB RAM・37 GiB disk（一時10 GiB）、自動停止は無効。
 
 ```sh
 uv run --with httpx deploy/heterocloud/coder.py list
@@ -115,9 +115,15 @@ uv run --with httpx deploy/heterocloud/coder.py start dev --yes
 uv run --with httpx deploy/heterocloud/manage.py status
 ```
 
-Standard Developではワークスペース1つにつき30 GiBを割り当てる。
+Standard Developではワークスペース1つにつき37 GiBを割り当てる。公開時に現在のサービス設定を読み、より大きいディスク割当を`workspace_storage_overrides`へ反映する。既存の永続容量を維持するため、rootfsを増やす際は総容量も同じ量以上増やす。
 2026-10-06に`GET /flash/quota`で保存済みの個別上限を確認した。合計ディスク上限は9,999 GiB。全アカウントの既定値100 GiBではなく、この個別上限が適用される。確認時の割当は`.heterocloud/flash-quota-verification.json`へ保存する。
 DBは単一レプリカ。バックアップの保存先は別途設定する。
+
+## 一時領域の更新（2026-10-11）
+
+`HyperEVM`、`Reverse`、`coconel`の同じFlashサービスを更新し、一時領域を3 GiBから10 GiB、総容量を30 GiBから37 GiBへ変更した。永続領域の割当は維持し、サービスやボリュームの削除・作り直しは行っていない。稼働中2件では永続領域内の確認ファイルのSHA256一致、SSH、VS CodeとFile BrowserのHTTPS 200を確認した。`coconel`は停止状態を維持している。
+
+テンプレートの自動停止は0、既存3件のTTLと停止期限も未設定。10/8版のIDE監視処理を引き継ぎ、`hc-tmp10-no-ttl-20261011`を有効化した。確認結果は`.heterocloud/tmp10-verification.json`。
 
 ## 実機確認（2026-10-05）
 
